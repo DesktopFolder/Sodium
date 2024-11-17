@@ -18,6 +18,7 @@ import me.jellysquid.mods.sodium.common.util.collections.DequeDrain;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.util.math.Vector3d;
 import net.minecraft.client.world.ClientWorld;
+import net.minecraft.util.Util;
 import net.minecraft.world.World;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -58,6 +59,7 @@ public class ChunkBuilder<T extends ChunkGraphicsState> {
         this.vertexType = vertexType;
         this.backend = backend;
         this.limitThreads = getOptimalThreadCount();
+        LOGGER.info("Creating {}", this);
     }
 
     /**
@@ -73,6 +75,7 @@ public class ChunkBuilder<T extends ChunkGraphicsState> {
      * running, this method does nothing and exits.
      */
     public void startWorkers() {
+        //x LOGGER.info("_P1 Workers {}", this);
         if (this.running.getAndSet(true)) {
             return;
         }
@@ -83,20 +86,67 @@ public class ChunkBuilder<T extends ChunkGraphicsState> {
 
         MinecraftClient client = MinecraftClient.getInstance();
 
-        for (int i = 0; i < this.limitThreads; i++) {
+        for (int i = 0; i < this.limitThreads /* 24 */; i++) {
+            long timerthing = Util.getMeasuringTimeNano();
+            long elapsed = 0;
+            int n = 0;
             ChunkBuildBuffers buffers = new ChunkBuildBuffers(this.vertexType, this.renderPassManager);
+
+            elapsed = Util.getMeasuringTimeNano() - timerthing;
+            n += 1;
+            if (elapsed > 1 * 1_000_000_000)
+            {
+                LOGGER.info("______________________{} tick was long {}", n, elapsed);
+            }
             ChunkRenderCacheLocal pipeline = new ChunkRenderCacheLocal(client, this.world);
+            elapsed = Util.getMeasuringTimeNano() - timerthing;
+            n += 1;
+            if (elapsed > 1 * 1_000_000_000)
+            {
+                LOGGER.info("______________________{} tick was long {}", n, elapsed);
+            }
 
             WorkerRunnable worker = new WorkerRunnable(buffers, pipeline);
+            elapsed = Util.getMeasuringTimeNano() - timerthing;
+            n += 1;
+            if (elapsed > 1 * 1_000_000_000)
+            {
+                LOGGER.info("______________________{} tick was long {}", n, elapsed);
+            }
 
             Thread thread = new Thread(worker, "Chunk Render Task Executor #" + i);
+            elapsed = Util.getMeasuringTimeNano() - timerthing;
+            n += 1;
+            if (elapsed > 1 * 1_000_000_000)
+            {
+                LOGGER.info("______________________{} tick was long {}", n, elapsed);
+            }
             thread.setPriority(Math.max(0, Thread.NORM_PRIORITY - 2));
+            elapsed = Util.getMeasuringTimeNano() - timerthing;
+            n += 1;
+            if (elapsed > 1 * 1_000_000_000)
+            {
+                LOGGER.info("______________________{} tick was long {}", n, elapsed);
+            }
             thread.start();
+            elapsed = Util.getMeasuringTimeNano() - timerthing;
+            n += 1;
+            if (elapsed > 1 * 1_000_000_000)
+            {
+                LOGGER.info("______________________{} tick was long {}", n, elapsed);
+            }
 
             this.threads.add(thread);
+            elapsed = Util.getMeasuringTimeNano() - timerthing;
+            n += 1;
+            if (elapsed > 1 * 1_000_000_000)
+            {
+                LOGGER.info("______________________{} tick was long {}", n, elapsed);
+            }
         }
 
-        LOGGER.info("Started {} worker threads", this.threads.size());
+        //xLOGGER.info("Starting workers on {}", this);
+        //xLOGGER.info("Started {} worker threads", this.threads.size());
     }
 
     /**
@@ -113,7 +163,8 @@ public class ChunkBuilder<T extends ChunkGraphicsState> {
             throw new IllegalStateException("No threads are alive but the executor is in the RUNNING state");
         }
 
-        LOGGER.info("Stopping worker threads");
+        //xLOGGER.info("Stopping workers on {}", this);
+        //xLOGGER.info("Stopping worker threads");
 
         // Notify all worker threads to wake up, where they will then terminate
         synchronized (this.jobNotifier) {
@@ -188,17 +239,22 @@ public class ChunkBuilder<T extends ChunkGraphicsState> {
      * @param renderPassManager The render pass manager used for the world
      */
     public void init(ClientWorld world, BlockRenderPassManager renderPassManager) {
+        LOGGER.info("Init #1 {}", this);
         if (world == null) {
             throw new NullPointerException("World is null");
         }
+        LOGGER.info("Init #2 {}", this);
 
         this.stopWorkers();
+        LOGGER.info("Init #3 {}", this);
 
         this.world = world;
         this.renderPassManager = renderPassManager;
         this.sectionCache = new ClonedChunkSectionCache(this.world);
+        LOGGER.info("Init #4 {}", this);
 
         this.startWorkers();
+        LOGGER.info("Init #5 {}", this);
     }
 
     /**
@@ -254,6 +310,13 @@ public class ChunkBuilder<T extends ChunkGraphicsState> {
         }
     }
 
+
+    @Override
+    protected void finalize() throws Throwable {
+        LOGGER.info("Finalizing a Chunkbuilder! :) {}", this);
+        super.finalize();
+    }
+
     public void onChunkDataChanged(int x, int y, int z) {
         this.sectionCache.invalidate(x, y, z);
     }
@@ -267,6 +330,7 @@ public class ChunkBuilder<T extends ChunkGraphicsState> {
         // Making this thread-local provides a small boost to performance by avoiding the overhead in synchronizing
         // caches between different CPU cores
         private final ChunkRenderCacheLocal cache;
+        private final Logger LOGGER = LogManager.getLogger("ChunkBuilderYay");
 
         public WorkerRunnable(ChunkBuildBuffers bufferCache, ChunkRenderCacheLocal cache) {
             this.bufferCache = bufferCache;
@@ -277,10 +341,12 @@ public class ChunkBuilder<T extends ChunkGraphicsState> {
         public void run() {
             // Run until the chunk builder shuts down
             while (this.running.get()) {
+                //xLOGGER.info("__1 Becoming employed! :) {}", this);
                 WrappedTask<T> job = this.getNextJob();
 
                 // If the job is null or no longer valid, keep searching for a task
                 if (job == null || job.isCancelled()) {
+                    //xLOGGER.info("__1 Potentially completing employment [cancelled]! :) {}", this);
                     continue;
                 }
 
@@ -292,6 +358,7 @@ public class ChunkBuilder<T extends ChunkGraphicsState> {
                 } catch (Exception e) {
                     // Propagate any exception from chunk building
                     job.future.completeExceptionally(e);
+                    //xLOGGER.info("Completing Exceptionally {}", this);
                     continue;
                 } finally {
                     job.task.releaseResources();
@@ -305,6 +372,7 @@ public class ChunkBuilder<T extends ChunkGraphicsState> {
                     // If the job wasn't cancelled and no result was produced, we've hit a bug
                     job.future.completeExceptionally(new RuntimeException("No result was produced by the task"));
                 }
+                //xLOGGER.info("__1 Potentially completing employment! :) {}", this);
             }
         }
 
@@ -316,6 +384,7 @@ public class ChunkBuilder<T extends ChunkGraphicsState> {
             WrappedTask<T> job = ChunkBuilder.this.buildQueue.poll();
 
             if (job == null) {
+                //xLOGGER.info("__2 Attempting Grab! :) {}", this);
                 synchronized (ChunkBuilder.this.jobNotifier) {
                     try {
                         // it is possible for notifyAll in stopWorkers to be called before this wait call, causing a deadlock.
@@ -327,9 +396,16 @@ public class ChunkBuilder<T extends ChunkGraphicsState> {
                     } catch (InterruptedException ignored) {
                     }
                 }
+                //xLOGGER.info("__2 Finished Grab! :) {}", this);
             }
 
             return job;
+        }
+
+        @Override
+        protected void finalize() throws Throwable {
+            //xLOGGER.info("Finalizing a thread! :) {}", this);
+            super.finalize();
         }
     }
 

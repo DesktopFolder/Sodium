@@ -9,12 +9,12 @@ import net.minecraft.client.options.GameOptions;
 import net.minecraft.client.render.*;
 import net.minecraft.client.util.math.MatrixStack;
 import net.minecraft.client.world.ClientWorld;
+import net.minecraft.util.Util;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Matrix4f;
-import org.spongepowered.asm.mixin.Final;
-import org.spongepowered.asm.mixin.Mixin;
-import org.spongepowered.asm.mixin.Overwrite;
-import org.spongepowered.asm.mixin.Shadow;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+import org.spongepowered.asm.mixin.*;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.Redirect;
@@ -27,6 +27,9 @@ public abstract class MixinWorldRenderer implements WorldRendererExtended {
     @Shadow
     @Final
     private BufferBuilderStorage bufferBuilders;
+
+    @Unique
+    private static final Logger LOGGER = LogManager.getLogger("MXWorldLogger");
 
     @Shadow
     @Final
@@ -105,12 +108,18 @@ public abstract class MixinWorldRenderer implements WorldRendererExtended {
      */
     @Overwrite
     private void setupTerrain(Camera camera, Frustum frustum, boolean hasForcedFrustum, int frame, boolean spectator) {
+        long timerthing = Util.getMeasuringTimeNano();
         RenderDevice.enterManagedCode();
 
         try {
             this.renderer.updateChunks(camera, frustum, hasForcedFrustum, frame, spectator);
         } finally {
             RenderDevice.exitManagedCode();
+        }
+        long elapsed = Util.getMeasuringTimeNano() - timerthing;
+        if (elapsed > 1 * 1_000_000_000)
+        {
+            LOGGER.info("MX ST tick was long ayo {}", elapsed);
         }
     }
 

@@ -39,11 +39,14 @@ import net.minecraft.util.math.ChunkPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.chunk.ChunkSection;
+import net.minecraft.client.MinecraftClient;
 
 import java.util.ArrayDeque;
 import java.util.Collection;
 import java.util.Deque;
 import java.util.concurrent.CompletableFuture;
+
+import static org.spongepowered.asm.mixin.MixinEnvironment.getProfiler;
 
 public class ChunkRenderManager<T extends ChunkGraphicsState> implements ChunkStatusListener {
     /**
@@ -433,6 +436,7 @@ public class ChunkRenderManager<T extends ChunkGraphicsState> implements ChunkSt
     }
 
     public void updateChunks() {
+        MinecraftClient.getInstance().getProfiler().push("Call updateChunks()");
         Deque<CompletableFuture<ChunkBuildResult<T>>> futures = new ArrayDeque<>();
 
         int budget = this.builder.getSchedulingBudget();
@@ -462,11 +466,15 @@ public class ChunkRenderManager<T extends ChunkGraphicsState> implements ChunkSt
         this.dirty |= submitted > 0;
 
         // Try to complete some other work on the main thread while we wait for rebuilds to complete
+        // this line might be causing lag?
+        MinecraftClient.getInstance().getProfiler().push("Perform pending uploads");
         this.dirty |= this.builder.performPendingUploads();
+        MinecraftClient.getInstance().getProfiler().pop();
 
         if (!futures.isEmpty()) {
             this.backend.upload(RenderDevice.INSTANCE.createCommandList(), new FutureDequeDrain<>(futures));
         }
+        MinecraftClient.getInstance().getProfiler().pop();
     }
 
     public void markDirty() {

@@ -32,8 +32,11 @@ import net.minecraft.client.render.model.ModelLoader;
 import net.minecraft.client.util.math.MatrixStack;
 import net.minecraft.client.world.ClientWorld;
 import net.minecraft.entity.Entity;
+import net.minecraft.util.Util;
 import net.minecraft.util.math.*;
 import net.minecraft.util.profiler.Profiler;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 import java.util.Set;
 import java.util.SortedSet;
@@ -51,6 +54,7 @@ public class SodiumWorldRenderer implements ChunkStatusListener {
     private double lastCameraPitch, lastCameraYaw;
 
     private boolean useEntityCulling;
+    private static final Logger LOGGER = LogManager.getLogger("SodiumWorldRenderer");
 
     private final LongSet loadedChunkPositions = new LongOpenHashSet();
     private final Set<BlockEntity> globalBlockEntities = new ObjectOpenHashSet<>();
@@ -145,12 +149,22 @@ public class SodiumWorldRenderer implements ChunkStatusListener {
      * Called prior to any chunk rendering in order to update necessary state.
      */
     public void updateChunks(Camera camera, Frustum frustum, boolean hasForcedFrustum, int frame, boolean spectator) {
+        long timerthing = Util.getMeasuringTimeNano();
+        long elapsed = 0;
+        int n = 0;
+        MinecraftClient.getInstance().getProfiler().push("Call SodiumWorldRenderer.updateChunks()");
         this.frustum = frustum;
 
         this.useEntityCulling = SodiumClientMod.options().advanced.useEntityCulling;
 
         if (this.client.options.viewDistance != this.renderDistance) {
             this.reload();
+        }
+        elapsed = Util.getMeasuringTimeNano() - timerthing;
+        n += 1;
+        if (elapsed > 1 * 1_000_000_000)
+        {
+            LOGGER.info("______________________{} tick was long {}", n, elapsed);
         }
 
         Profiler profiler = this.client.getProfiler();
@@ -181,21 +195,46 @@ public class SodiumWorldRenderer implements ChunkStatusListener {
 
         profiler.swap("chunk_update");
 
+        elapsed = Util.getMeasuringTimeNano() - timerthing;
+        n += 1;
+        if (elapsed > 1 * 1_000_000_000)
+        {
+            LOGGER.info("______________________{} tick was long {}", n, elapsed);
+        }
         this.chunkRenderManager.updateChunks();
+        elapsed = Util.getMeasuringTimeNano() - timerthing;
+        n += 1;
+        if (elapsed > 1 * 1_000_000_000)
+        {
+            LOGGER.info("______________________{} tick was long {}", n, elapsed);
+        }
 
         if (!hasForcedFrustum && this.chunkRenderManager.isDirty()) {
             profiler.swap("chunk_graph_rebuild");
 
             this.chunkRenderManager.update(camera, (FrustumExtended) frustum, frame, spectator);
         }
+        elapsed = Util.getMeasuringTimeNano() - timerthing;
+        n += 1;
+        if (elapsed > 1 * 1_000_000_000)
+        {
+            LOGGER.info("______________________{} tick was long {}", n, elapsed);
+        }
 
         profiler.swap("visible_chunk_tick");
 
         this.chunkRenderManager.tickVisibleRenders();
+        elapsed = Util.getMeasuringTimeNano() - timerthing;
+        n += 1;
+        if (elapsed > 1 * 1_000_000_000)
+        {
+            LOGGER.info("______________________{} tick was long {}", n, elapsed);
+        }
 
         profiler.pop();
 
         Entity.setRenderDistanceMultiplier(MathHelper.clamp((double) this.client.options.viewDistance / 8.0D, 1.0D, 2.5D) * (double) this.client.options.entityDistanceScaling);
+        MinecraftClient.getInstance().getProfiler().pop();
     }
 
     /**
@@ -224,24 +263,34 @@ public class SodiumWorldRenderer implements ChunkStatusListener {
     }
 
     private void initRenderer() {
+        MinecraftClient.getInstance().getProfiler().push("Call SodiumWorldRenderer.initRenderer()");
+        LOGGER.info("Calling INITRENDERER on {}", this);
         if (this.chunkRenderManager != null) {
             this.chunkRenderManager.destroy();
+
             this.chunkRenderManager = null;
+            LOGGER.info("DESTROYED CRM {}", this);
         }
 
+        LOGGER.info("_P2 {}", this);
         if (this.chunkRenderBackend != null) {
             this.chunkRenderBackend.delete();
             this.chunkRenderBackend = null;
         }
 
+        LOGGER.info("_P3 {}", this);
         RenderDevice device = RenderDevice.INSTANCE;
 
+        LOGGER.info("_P4 {}", this);
         this.renderDistance = this.client.options.viewDistance;
 
+        LOGGER.info("_P5 {}", this);
         SodiumGameOptions opts = SodiumClientMod.options();
 
+        LOGGER.info("_P6 {}", this);
         this.renderPassManager = BlockRenderPassManager.createDefaultMappings();
 
+        LOGGER.info("_P7 {}", this);
         final ChunkVertexType vertexFormat;
 
         if (opts.advanced.useCompactVertexFormat) {
@@ -250,11 +299,17 @@ public class SodiumWorldRenderer implements ChunkStatusListener {
             vertexFormat = DefaultModelVertexFormats.MODEL_VERTEX_SFP;
         }
 
+        LOGGER.info("_P8 {}", this);
         this.chunkRenderBackend = createChunkRenderBackend(device, opts, vertexFormat);
         this.chunkRenderBackend.createShaders(device);
 
+        LOGGER.info("_P9 {}", this);
         this.chunkRenderManager = new ChunkRenderManager<>(this, this.chunkRenderBackend, this.renderPassManager, this.world, this.renderDistance);
+
+        LOGGER.info("_P10 {}", this);
         this.chunkRenderManager.restoreChunks(this.loadedChunkPositions);
+        LOGGER.info("FINISHED INITRENDERER on {}", this);
+        MinecraftClient.getInstance().getProfiler().pop();
     }
 
     private static ChunkRenderBackend<?> createChunkRenderBackend(RenderDevice device,
