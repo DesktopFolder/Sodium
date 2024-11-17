@@ -62,7 +62,10 @@ public class ChunkBuilder<T extends ChunkGraphicsState> {
         this.vertexType = vertexType;
         this.backend = backend;
         this.limitThreads = getOptimalThreadCount();
+        // We assume nobody is running with 1 CPU, I guess.
         this.initialThreads = Math.max(2, this.limitThreads / 6 /* Arbitrarily chosen :) */);
+
+        this.hasThreadSpace = this.limitThreads > this.initialThreads;
     }
 
     /**
@@ -102,13 +105,21 @@ public class ChunkBuilder<T extends ChunkGraphicsState> {
         MinecraftClient client = MinecraftClient.getInstance();
 
         for (int i = 0; i < this.initialThreads; i++) {
-            this.spawnThread(client);
+            // Don't change any of this code (even though we factored it out into spawnThread()) because SeedQueue
+            // injects like crazy in here.
+            ChunkBuildBuffers buffers = new ChunkBuildBuffers(this.vertexType, this.renderPassManager);
+            ChunkRenderCacheLocal pipeline = new ChunkRenderCacheLocal(client, this.world);
+
+            WorkerRunnable worker = new WorkerRunnable(buffers, pipeline);
+
+            Thread thread = new Thread(worker, "Chunk Render Task Executor #" + this.threads.size());
+            thread.setPriority(Math.max(0, Thread.NORM_PRIORITY - 2));
+            thread.start();
+
+            this.threads.add(thread);
         }
 
-        // If we still have overhead space for more threads, keep that information for later.
-        // We can start more threads if we need them for work in the future.
-        this.hasThreadSpace = this.threads.size() < this.limitThreads;
-
+        // More SeedQueue compatibility, ideally we would log the number of threads.
         LOGGER.info("Started {} worker threads", this.threads.size());
     }
 
@@ -123,6 +134,10 @@ public class ChunkBuilder<T extends ChunkGraphicsState> {
         this.updates = 0; // Only gradually increase thread count.
         this.spawnThread(MinecraftClient.getInstance());
         this.hasThreadSpace = this.threads.size() < this.limitThreads;
+        if (!this.hasThreadSpace)
+        {
+            LOGGER.info("Maxed out chunk builder threads at {}", this.threads.size());
+        }
     }
 
     /**
@@ -139,7 +154,9 @@ public class ChunkBuilder<T extends ChunkGraphicsState> {
             throw new IllegalStateException("No threads are alive but the executor is in the RUNNING state");
         }
 
-        LOGGER.info("Stopping {} worker threads", this.threads.size());
+        // Temporary seedqueue compatibility - log less so that its inject works
+        // LOGGER.info("Stopping {} worker threads", this.threads.size());
+        LOGGER.info("Stopping worker threads");
 
         // Notify all worker threads to wake up, where they will then terminate
         synchronized (this.jobNotifier) {
