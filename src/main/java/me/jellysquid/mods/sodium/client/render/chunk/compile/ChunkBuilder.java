@@ -51,6 +51,10 @@ public class ChunkBuilder<T extends ChunkGraphicsState> {
     private BlockRenderPassManager renderPassManager;
 
     private final int limitThreads;
+    private final int initialThreads;
+    private boolean hasThreadSpace = true;
+    private int updates = 0;
+
     private final ChunkVertexType vertexType;
     private final ChunkRenderBackend<T> backend;
 
@@ -58,6 +62,7 @@ public class ChunkBuilder<T extends ChunkGraphicsState> {
         this.vertexType = vertexType;
         this.backend = backend;
         this.limitThreads = getOptimalThreadCount();
+        this.initialThreads = Math.max(2, this.limitThreads / 6 /* Arbitrarily chosen :) */);
     }
 
     /**
@@ -66,6 +71,19 @@ public class ChunkBuilder<T extends ChunkGraphicsState> {
      */
     public int getSchedulingBudget() {
         return Math.max(0, (this.limitThreads * TASK_QUEUE_LIMIT_PER_WORKER) - this.buildQueue.size());
+    }
+
+    private void spawnThread(MinecraftClient client) {
+        ChunkBuildBuffers buffers = new ChunkBuildBuffers(this.vertexType, this.renderPassManager);
+        ChunkRenderCacheLocal pipeline = new ChunkRenderCacheLocal(client, this.world);
+
+        WorkerRunnable worker = new WorkerRunnable(buffers, pipeline);
+
+        Thread thread = new Thread(worker, "Chunk Render Task Executor #" + this.threads.size());
+        thread.setPriority(Math.max(0, Thread.NORM_PRIORITY - 2));
+        thread.start();
+
+        this.threads.add(thread);
     }
 
     /**
@@ -83,20 +101,28 @@ public class ChunkBuilder<T extends ChunkGraphicsState> {
 
         MinecraftClient client = MinecraftClient.getInstance();
 
-        for (int i = 0; i < this.limitThreads; i++) {
-            ChunkBuildBuffers buffers = new ChunkBuildBuffers(this.vertexType, this.renderPassManager);
-            ChunkRenderCacheLocal pipeline = new ChunkRenderCacheLocal(client, this.world);
-
-            WorkerRunnable worker = new WorkerRunnable(buffers, pipeline);
-
-            Thread thread = new Thread(worker, "Chunk Render Task Executor #" + i);
-            thread.setPriority(Math.max(0, Thread.NORM_PRIORITY - 2));
-            thread.start();
-
-            this.threads.add(thread);
+        for (int i = 0; i < this.initialThreads; i++) {
+            this.spawnThread(client);
         }
 
+        // If we still have overhead space for more threads, keep that information for later.
+        // We can start more threads if we need them for work in the future.
+        this.hasThreadSpace = this.threads.size() < this.limitThreads;
+
         LOGGER.info("Started {} worker threads", this.threads.size());
+    }
+
+    public void maybeIncreaseThreadLimit()
+    {
+        // Sometimes, we want more threads :)
+        // In that case, let's slowly add them!
+        // :) Doesn't everyone love more threads?
+        if (!this.hasThreadSpace || (this.updates++ < 60 /* Arbitrary! */) || !this.running.get()) {
+            return;
+        }
+        this.updates = 0; // Only gradually increase thread count.
+        this.spawnThread(MinecraftClient.getInstance());
+        this.hasThreadSpace = this.threads.size() < this.limitThreads;
     }
 
     /**
@@ -113,7 +139,7 @@ public class ChunkBuilder<T extends ChunkGraphicsState> {
             throw new IllegalStateException("No threads are alive but the executor is in the RUNNING state");
         }
 
-        LOGGER.info("Stopping worker threads");
+        LOGGER.info("Stopping {} worker threads", this.threads.size());
 
         // Notify all worker threads to wake up, where they will then terminate
         synchronized (this.jobNotifier) {
@@ -184,6 +210,7 @@ public class ChunkBuilder<T extends ChunkGraphicsState> {
      * Initializes this chunk builder for the given world. If the builder is already running (which can happen during
      * a world teleportation event), the worker threads will first be stopped and all pending tasks will be discarded
      * before being started again.
+     * Note: The above comment appears to be false. We only ever call init() once, directly after ChunkBuilder creation.
      * @param world The world instance
      * @param renderPassManager The render pass manager used for the world
      */
@@ -192,7 +219,11 @@ public class ChunkBuilder<T extends ChunkGraphicsState> {
             throw new NullPointerException("World is null");
         }
 
-        this.stopWorkers();
+        if (this.running.get()) {
+            throw new IllegalStateException("Init called on already-running chunk builder.");
+        }
+
+        this.stopWorkers(); // Does nothing, ever.
 
         this.world = world;
         this.renderPassManager = renderPassManager;
