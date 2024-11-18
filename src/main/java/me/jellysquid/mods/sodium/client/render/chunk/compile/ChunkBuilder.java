@@ -50,9 +50,9 @@ public class ChunkBuilder<T extends ChunkGraphicsState> {
     private World world;
     private BlockRenderPassManager renderPassManager;
 
-    private final int limitThreads;
-    private final int initialThreads;
-    private boolean hasThreadSpace = true;
+    private int limitThreads;
+    private int initialThreads;
+    private boolean hasThreadSpace = false;
     private int updates = 0;
 
     private final ChunkVertexType vertexType;
@@ -63,7 +63,15 @@ public class ChunkBuilder<T extends ChunkGraphicsState> {
         this.backend = backend;
         this.limitThreads = getOptimalThreadCount();
         // We assume nobody is running with 1 CPU, I guess.
-        this.initialThreads = Math.max(2, this.limitThreads / 6 /* Arbitrarily chosen :) */);
+        this.initialThreads = this.limitThreads;
+    }
+
+    public void SetupWithRender(int viewDistance) {
+        // Choose threads based on viewDistance.
+        final int maxThreads = getOptimalThreadCount();
+        this.limitThreads = maxThreads * Math.min(Math.max(viewDistance, 5), 32) / 32;
+        // We assume nobody is running with 1 CPU, I guess.
+        this.initialThreads = Math.max(2, this.limitThreads / 2 /* Arbitrarily chosen :) */);
 
         this.hasThreadSpace = this.limitThreads > this.initialThreads;
     }
